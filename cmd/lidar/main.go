@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	pcapFile = "static/sample1.pcap"
-	// velodyneIP   = "127.0.0.1"
-	velodyneIP   = "192.168.1.2"
+	pcapFile   = "static/sample1.pcap"
+	velodyneIP = "127.0.0.1"
+	//velodyneIP   = "192.168.1.2"
 	velodynePort = 2368
 	packetSize   = 1206
 )

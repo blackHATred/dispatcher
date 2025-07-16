@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/chewxy/math32"
+	"log"
 )
 
 type PointCloudProcessor struct {
@@ -24,24 +25,32 @@ func (p *PointCloudProcessor) SetCompressors(compressors ...PointCloudCompressor
 func (p *PointCloudProcessor) Tx(in <-chan udp.Packet, out chan<- []byte) {
 	frameBuf := make([][]float32, 0, 40000)
 	prevAzimuth := float32(-1.0)
+	frameCount := 0
+
 	for packet := range in {
 		buf := packet.RawData
 		azimuth := float32(uint16(buf[2])|uint16(buf[3])<<8) / 100.0
 		if prevAzimuth >= 0 && azimuth < prevAzimuth {
 			if len(frameBuf) > 0 {
+				frameCount++
+				log.Printf("Processor: Обработка кадра #%d: %d точек", frameCount, len(frameBuf))
 				data, err := serializePoints(frameBuf)
 				if err != nil {
+					log.Printf("Processor: Ошибка сериализации кадра #%d: %v", frameCount, err)
 					continue
 				}
-				for _, compressor := range p.compressors {
+				for i, compressor := range p.compressors {
 					data, err = compressor.Compress(data)
 					if err != nil {
+						log.Printf("Processor: Ошибка компрессии #%d для кадра #%d: %v", i, frameCount, err)
 						continue
 					}
 				}
 				select {
 				case out <- data:
+					log.Printf("Processor: Кадр #%d отправлен в канал byteChan (размер: %d байт)", frameCount, len(data))
 				default:
+					log.Printf("Processor: Канал byteChan заполнен, кадр #%d пропущен", frameCount)
 				}
 			}
 			frameBuf = make([][]float32, 0, 40000)
@@ -72,21 +81,41 @@ func (p *PointCloudProcessor) Tx(in <-chan udp.Packet, out chan<- []byte) {
 
 // Rx отвечает за обратный проход по pipeline компрессоров и десериализацию
 func (p *PointCloudProcessor) Rx(in <-chan []byte, out chan<- [][]float32) {
+	frameCount := 0
 	for data := range in {
+		frameCount++
+		log.Printf("Rx: получен кадр #%d (размер: %d байт)", frameCount, len(data))
+
 		var err error
 		for i := len(p.compressors) - 1; i >= 0; i-- {
+			log.Printf("Rx: декомпрессия #%d для кадра #%d, тип компрессора: %T", i, frameCount, p.compressors[i])
+			before := len(data)
 			data, err = p.compressors[i].Decompress(data)
 			if err != nil {
-				continue
+				log.Printf("Rx: ошибка декомпрессии #%d для кадра #%d: %v", i, frameCount, err)
+				break
 			}
+			log.Printf("Rx: декомпрессия #%d успешна, размер до: %d, после: %d байт", i, before, len(data))
 		}
-		pts, err := deserializePoints(data)
+
 		if err != nil {
+			log.Printf("Rx: пропуск кадра #%d из-за ошибки декомпрессии", frameCount)
 			continue
 		}
+
+		pts, err := deserializePoints(data)
+		if err != nil {
+			log.Printf("Rx: ошибка десериализации точек для кадра #%d: %v", frameCount, err)
+			continue
+		}
+
+		log.Printf("Rx: десериализовано %d точек для кадра #%d", len(pts), frameCount)
+
 		select {
 		case out <- pts:
+			log.Printf("Rx: кадр #%d отправлен в канал pointsChan", frameCount)
 		default:
+			log.Printf("Rx: канал pointsChan заполнен, кадр #%d пропущен", frameCount)
 		}
 	}
 }
