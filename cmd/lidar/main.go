@@ -42,7 +42,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Ошибка открытия UDP: %v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 		count := 0

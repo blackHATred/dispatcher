@@ -18,6 +18,9 @@ gen-cert:
 
 # Установка бинарников и сервисов
 install: gen-cert install-server install-client
+	@echo "Creating configuration files..."
+	sudo touch /etc/dispatcher/server.yaml
+	sudo touch /etc/dispatcher/client.yaml
 
 install-server: server
 	@echo "Installing server..."
