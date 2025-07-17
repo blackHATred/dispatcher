@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"dispatcher/internal/config"
 	deliveryUdp "dispatcher/internal/delivery/udp"
 	"dispatcher/internal/usecase"
 	gzipCompressor "dispatcher/internal/usecase/compressor/gzip"
 	voxelCompressor "dispatcher/internal/usecase/compressor/voxel"
-	"flag"
 	"fmt"
 	"github.com/quic-go/quic-go"
 	"log"
@@ -23,34 +23,31 @@ var sendBufferPool = sync.Pool{
 	},
 }
 
-const (
-	velodynePort = 2368
-)
-
 func main() {
-	// Флаги
-	serverIP := flag.String("server-ip", "localhost", "IP удалённого сервера для QUIC соединения")
-	serverPort := flag.Int("server-port", 8081, "Порт удалённого сервера для QUIC соединения")
-	listenPort := flag.Int("port", velodynePort, "Порт для HTTP и UDP сервера")
-	listenIP := flag.String("ip", "0.0.0.0", "IP для прослушивания UDP и HTTP сервера")
-	filterRadius := flag.Float64("filter-radius", 0.5, "Радиус фильтрации точек у центра (0 - отключить фильтр)")
-	voxelSize := flag.Float64("voxel-size", 0.05, "Размер вокселя для компрессора")
-	flag.Parse()
+	// Загружаем конфигурацию
+	cfg, err := config.LoadClientConfig()
+	if err != nil {
+		log.Fatalf("Ошибка загрузки конфигурации: %v", err)
+	}
+
+	log.Printf("Конфигурация загружена: соединение с %s:%d, прослушивание на %s:%d",
+		cfg.Network.ServerIP, cfg.Network.ServerPort,
+		cfg.Network.ListenIP, cfg.Network.ListenPort)
 
 	// UDP слушатель для принятия точек от Velodyne
 	// --------------------------------------------
 	udpChan := make(chan deliveryUdp.Packet, 1024)
 	// Запускаем UDP слушатель
-	err := deliveryUdp.StartUDPListener(*listenIP, *listenPort, udpChan)
+	err = deliveryUdp.StartUDPListener(cfg.Network.ListenIP, cfg.Network.ListenPort, udpChan)
 	if err != nil {
 		log.Fatalf("Ошибка запуска UDP: %v\n", err)
 	}
 	byteChan := make(chan []byte, 1024)
-	processor := usecase.NewPointCloudProcessor(float32(*filterRadius))
+	processor := usecase.NewPointCloudProcessor(float32(cfg.Processing.FilterRadius))
 
 	// сначала voxel, потом gzip
 	processor.SetCompressors(
-		voxelCompressor.NewVoxelCompressor(float32(*voxelSize)),
+		voxelCompressor.NewVoxelCompressor(float32(cfg.Processing.VoxelSize)),
 		gzipCompressor.NewGzipCompressor(),
 	)
 
@@ -67,7 +64,7 @@ func main() {
 		MaxIdleTimeout:  600 * time.Second,
 	}
 	ctx := context.Background()
-	conn, err := quic.DialAddr(ctx, fmt.Sprintf("%s:%d", *serverIP, *serverPort), tlsConf, quicConf)
+	conn, err := quic.DialAddr(ctx, fmt.Sprintf("%s:%d", cfg.Network.ServerIP, cfg.Network.ServerPort), tlsConf, quicConf)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к QUIC серверу: %v", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -10,25 +11,33 @@ import (
 	"time"
 )
 
+// Дефолтные значения конфигурации
 const (
-	pcapFile   = "static/sample1.pcap"
-	velodyneIP = "127.0.0.1"
-	//velodyneIP   = "192.168.1.2"
-	velodynePort = 2368
-	packetSize   = 1206
+	defaultPcapFile     = "static/sample1.pcap"
+	defaultVelodyneIP   = "192.168.1.2"
+	defaultVelodynePort = 2368
+	packetSize          = 1206
 )
 
 func main() {
+	// Парсим флаги командной строки
+	pcapFile := flag.String("pcap", defaultPcapFile, "Путь к PCAP-файлу")
+	velodyneIP := flag.String("ip", defaultVelodyneIP, "IP-адрес для отправки данных")
+	velodynePort := flag.Int("port", defaultVelodynePort, "Порт для отправки данных")
+	flag.Parse()
+
+	log.Printf("Используем конфигурацию: pcap=%s, ip=%s, port=%d", *pcapFile, *velodyneIP, *velodynePort)
+
 	for {
-		handle, err := pcap.OpenOffline(pcapFile)
+		handle, err := pcap.OpenOffline(*pcapFile)
 		if err != nil {
 			log.Fatalf("Ошибка открытия pcap: %v", err)
 		}
 		defer handle.Close()
 
 		conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
-			IP:   net.ParseIP(velodyneIP),
-			Port: velodynePort,
+			IP:   net.ParseIP(*velodyneIP),
+			Port: *velodynePort,
 		})
 		if err != nil {
 			log.Fatalf("Ошибка открытия UDP: %v", err)

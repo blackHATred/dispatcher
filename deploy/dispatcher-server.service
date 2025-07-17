@@ -1,0 +1,15 @@
+[Unit]
+Description=Dispatcher Server - LiDAR point cloud server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/dispatcher-server
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"dispatcher/internal/config"
 	deliveryHttp "dispatcher/internal/delivery/http"
 	"dispatcher/internal/usecase"
 	gzipCompressor "dispatcher/internal/usecase/compressor/gzip"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/labstack/echo/v4"
 	"github.com/quic-go/quic-go"
@@ -33,19 +33,21 @@ var dataBufferPool = sync.Pool{
 }
 
 func main() {
-	listenIP := flag.String("ip", "0.0.0.0", "IP для прослушивания QUIC")
-	listenPort := flag.Int("port", 8081, "Порт для прослушивания QUIC")
-	ssePort := flag.Int("sse-port", 8080, "Порт SSE")
-	sseIP := flag.String("sse-ip", "0.0.0.0", "IP SSE")
-	cors := flag.String("cors", "*", "Значение Access-Control-Allow-Origin для CORS")
-	filterRadius := flag.Float64("filter-radius", 0.05, "Радиус фильтрации точек у центра (0 - отключить фильтр)")
-	flag.Parse()
+	// Загружаем конфигурацию
+	cfg, err := config.LoadServerConfig()
+	if err != nil {
+		log.Fatalf("Ошибка загрузки конфигурации: %v", err)
+	}
+
+	log.Printf("Конфигурация загружена: QUIC на %s:%d, SSE на %s:%d",
+		cfg.Network.ListenIP, cfg.Network.ListenPort,
+		cfg.Network.SseIP, cfg.Network.SsePort)
 
 	// SSE сервер для операторов
 	// -------------------------
 	pointsChan := make(chan [][]float32, 1024)
 	byteChan := make(chan []byte, 1024)
-	processor := usecase.NewPointCloudProcessor(float32(*filterRadius))
+	processor := usecase.NewPointCloudProcessor(float32(cfg.Processing.FilterRadius))
 	processor.SetCompressors(
 		gzipCompressor.NewGzipCompressor(),
 	)
@@ -56,15 +58,15 @@ func main() {
 	e.HideBanner = true
 	e.HidePort = true
 
-	deliveryHttp.RegisterSSEHandler(e, deliveryHttp.SSEConfig{CORS: *cors}, pointsChan)
+	deliveryHttp.RegisterSSEHandler(e, deliveryHttp.SSEConfig{CORS: cfg.Network.Cors}, pointsChan)
 
 	// Добавляем отдачу статических файлов Vite
 	e.GET("/*", echo.WrapHandler(deliveryHttp.StaticHandler()))
 
 	// Стартуем HTTP сервер
-	log.Printf("HTTP сервер запущен на %s:%d\n", *sseIP, *ssePort)
+	log.Printf("HTTP сервер запущен на %s:%d\n", cfg.Network.SseIP, cfg.Network.SsePort)
 	go func() {
-		err := e.Start(fmt.Sprintf("%s:%d", *sseIP, *ssePort))
+		err := e.Start(fmt.Sprintf("%s:%d", cfg.Network.SseIP, cfg.Network.SsePort))
 		if err != nil {
 			log.Fatalf("Ошибка запуска HTTP сервера: %v\n", err)
 		}
@@ -72,9 +74,7 @@ func main() {
 
 	// QUIC для принятия данных от ТС
 	// ------------------------------
-	certFile := "config/localhost.pem"
-	keyFile := "config/localhost-key.pem"
-	tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	tlsCert, err := tls.LoadX509KeyPair(cfg.SSL.CertFile, cfg.SSL.KeyFile)
 	if err != nil {
 		log.Fatal("Ошибка загрузки сертификатов:", err)
 	}
@@ -85,11 +85,11 @@ func main() {
 	quicConf := &quic.Config{
 		EnableDatagrams: true,
 	}
-	ln, err := quic.ListenAddr(fmt.Sprintf("%s:%d", *listenIP, *listenPort), tlsConf, quicConf)
+	ln, err := quic.ListenAddr(fmt.Sprintf("%s:%d", cfg.Network.ListenIP, cfg.Network.ListenPort), tlsConf, quicConf)
 	if err != nil {
 		log.Fatalf("Ошибка запуска QUIC сервера: %v", err)
 	}
-	log.Printf("QUIC сервер запущен на %s:%d", *listenIP, *listenPort)
+	log.Printf("QUIC сервер запущен на %s:%d", cfg.Network.ListenIP, cfg.Network.ListenPort)
 	for {
 		conn, err := ln.Accept(context.Background())
 		if err != nil {
